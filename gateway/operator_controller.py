@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -13,6 +14,14 @@ class OperatorAdapter(Protocol):
     def list_custom_resources(self) -> list[dict[str, object]]: ...
 
     def patch_custom_resource(
+        self,
+        *,
+        namespace: str,
+        name: str,
+        patch: dict[str, object],
+    ) -> None: ...
+
+    def patch_custom_resource_status(
         self,
         *,
         namespace: str,
@@ -205,7 +214,9 @@ class AxiomZetaSentinelGatewayReconciler:
         reason: str,
         message: str,
     ) -> None:
-        self.adapter.patch_custom_resource(
+        # Status writes go through the /status subresource (the CRD enables it);
+        # the finalizer patch in _reconcile_resource stays on the main endpoint.
+        self.adapter.patch_custom_resource_status(
             namespace=namespace,
             name=name,
             patch={
@@ -225,7 +236,10 @@ class AxiomZetaSentinelGatewayReconciler:
         )
 
     def _resource_hash(self, resource: dict[str, object]) -> str:
-        return sha256(repr(resource.get("spec", {})).encode("utf-8")).hexdigest()
+        # Canonical JSON (sorted keys) so semantically identical specs hash alike
+        # regardless of dict insertion order; repr() is order-sensitive.
+        canonical = json.dumps(resource.get("spec", {}), sort_keys=True, default=str, separators=(",", ":"))
+        return sha256(canonical.encode("utf-8")).hexdigest()
 
     def _desired_deployment(self, resource: dict[str, object]) -> dict[str, object]:
         spec = resource.get("spec")
@@ -281,6 +295,20 @@ class AxiomZetaSentinelGatewayReconciler:
             {"name": "TENANT_RUNTIME_CACHE_ENABLED", "value": str(bool(spec.get("tenantRuntimeCacheEnabled", False))).lower()},
         ]
 
+        # Secrets never live in the CR. If spec.auth.secretName names a Secret in the
+        # CR's namespace, inject the gateway secrets from it; without this the spawned
+        # gateway fails closed (no GATEWAY_API_KEY) or cannot complete OIDC login
+        # (no OIDC_CLIENT_SECRET / OIDC_SESSION_SECRET).
+        secret_name = str(auth.get("secretName", "") or "").strip()
+        if secret_name:
+            for key in ("GATEWAY_API_KEY", "OIDC_CLIENT_SECRET", "OIDC_SESSION_SECRET"):
+                env.append(
+                    {
+                        "name": key,
+                        "valueFrom": {"secretKeyRef": {"name": secret_name, "key": key, "optional": True}},
+                    }
+                )
+
         volumes: list[dict[str, object]] = []
         volume_mounts: list[dict[str, object]] = []
         if policy_bundle_config_map:
@@ -322,6 +350,13 @@ class AxiomZetaSentinelGatewayReconciler:
                 "template": {
                     "metadata": {"labels": labels},
                     "spec": {
+                        "securityContext": {
+                            "runAsNonRoot": True,
+                            "runAsUser": 10001,
+                            "runAsGroup": 10001,
+                            "fsGroup": 10001,
+                            "seccompProfile": {"type": "RuntimeDefault"},
+                        },
                         "containers": [
                             {
                                 "name": "gateway",
@@ -383,6 +418,18 @@ class KubernetesOperatorAdapter:
 
     def patch_custom_resource(self, *, namespace: str, name: str, patch: dict[str, object]) -> None:  # pragma: no cover
         self._custom.patch_namespaced_custom_object(
+            group="platform.axiomzetasentinel.io",
+            version="v1alpha1",
+            namespace=namespace,
+            plural="axiomzetasentinelgateways",
+            name=name,
+            body=patch,
+        )
+
+    def patch_custom_resource_status(self, *, namespace: str, name: str, patch: dict[str, object]) -> None:  # pragma: no cover
+        # The CRD enables the status subresource; status writes MUST go through
+        # this endpoint — the API server silently drops status on main-resource patches.
+        self._custom.patch_namespaced_custom_object_status(
             group="platform.axiomzetasentinel.io",
             version="v1alpha1",
             namespace=namespace,

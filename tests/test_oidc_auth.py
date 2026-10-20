@@ -138,3 +138,83 @@ def test_oidc_mode_ignores_identity_headers_unless_proxy_trusted(monkeypatch):
         json={"name": "Spoofed Org"},
     )
     assert spoofed.status_code == 401
+
+
+def _build_bearer_client(monkeypatch, *, audience=None, client_id="svc-client"):
+    from gateway.core import auth as auth_mod
+    import importlib
+
+    monkeypatch.delenv("GATEWAY_API_KEY", raising=False)
+    monkeypatch.setenv("AUTH_MODE", "oidc")
+    monkeypatch.setenv("TEAM_STORE_BACKEND", "memory")
+    monkeypatch.setenv("OIDC_JWKS_URL", "https://issuer.example.com/jwks")
+    monkeypatch.setenv("OIDC_ISSUER", "https://issuer.example.com")
+    monkeypatch.setenv("OIDC_CLIENT_ID", client_id)
+    if audience is None:
+        monkeypatch.delenv("OIDC_AUDIENCE", raising=False)
+    else:
+        monkeypatch.setenv("OIDC_AUDIENCE", audience)
+
+    _install_fake_axiom_zeta_sentinel_core()
+    for name in [
+        "gateway.core.team",
+        "gateway.core.team_schemas",
+        "gateway.core.service",
+        "gateway.api.routes_team",
+        "gateway.api.routes_stabilize",
+        "gateway.main",
+    ]:
+        if name in sys.modules:
+            importlib.reload(sys.modules[name])
+        else:
+            importlib.import_module(name)
+    main = sys.modules["gateway.main"]
+    return TestClient(main.app)
+
+
+def _signed_token(*, key, kid, aud, iss="https://issuer.example.com"):
+    import time
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    import jwt as pyjwt
+    now = int(time.time())
+    return pyjwt.encode(
+        {"sub": "svc-user", "aud": aud, "iss": iss, "iat": now, "exp": now + 300},
+        key,
+        algorithm="RS256",
+        headers={"kid": kid},
+    )
+
+
+def _mock_jwks(monkeypatch, key):
+    from gateway.core import auth as auth_mod
+
+    class FakeKey:
+        def __init__(self, k):
+            self.key = k
+
+    class FakeClient:
+        def get_signing_key_from_jwt(self, token):
+            return FakeKey(key)
+
+    monkeypatch.setattr(auth_mod, "_jwk_client_for", lambda url: FakeClient())
+
+
+def test_bearer_audience_defaults_to_client_id(monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    verify_key = private.public_key()
+
+    _mock_jwks(monkeypatch, verify_key)
+    client = _build_bearer_client(monkeypatch, audience=None, client_id="svc-client")
+
+    # Token for a DIFFERENT audience must be rejected even though OIDC_AUDIENCE is unset:
+    # the client_id is the fallback audience (id_tokens are aud-bound to the client).
+    bad = _signed_token(key=private, kid="k1", aud="someone-else")
+    res = client.get("/v1/auth/session", headers={"Authorization": f"Bearer {bad}"})
+    assert res.status_code == 401
+
+    good = _signed_token(key=private, kid="k1", aud="svc-client")
+    res = client.get("/v1/auth/session", headers={"Authorization": f"Bearer {good}"})
+    assert res.status_code == 200
+    assert res.json()["user_id"] == "svc-user"

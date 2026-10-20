@@ -55,3 +55,30 @@ def test_conversion_webhook_converts_api_version():
     body = res.json()
     assert body["response"]["result"]["status"] == "Success"
     assert body["response"]["convertedObjects"][0]["apiVersion"] == "platform.axiomzetasentinel.io/v1alpha1"
+
+
+def test_validating_webhook_rejects_oidc_without_endpoints():
+    client = TestClient(app)
+    payload = _admission_request({"spec": {"image": "ghcr.io/acme/x:latest", "auth": {"mode": "oidc"}}})
+    res = client.post("/validate-platform-axiomzetasentinel-io-v1alpha1-axiomzetasentinelgateway", json=payload)
+    assert res.status_code == 200
+    assert res.json()["response"]["allowed"] is False
+
+
+def test_validating_webhook_accepts_oidc_with_endpoints():
+    client = TestClient(app)
+    payload = _admission_request(
+        {
+            "spec": {
+                "image": "ghcr.io/acme/x:latest",
+                "auth": {
+                    "mode": "oidc",
+                    "oidcIssuer": "https://idp.example.com",
+                    "oidcJwksUrl": "https://idp.example.com/jwks",
+                },
+            }
+        }
+    )
+    res = client.post("/validate-platform-axiomzetasentinel-io-v1alpha1-axiomzetasentinelgateway", json=payload)
+    assert res.status_code == 200
+    assert res.json()["response"]["allowed"] is True

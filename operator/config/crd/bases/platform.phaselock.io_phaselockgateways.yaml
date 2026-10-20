@@ -46,6 +46,12 @@ spec:
                     mode:
                       type: string
                       enum: [api_key, oidc]
+                    secretName:
+                      type: string
+                      description: >-
+                        Name of a Secret in the CR's namespace holding GATEWAY_API_KEY,
+                        OIDC_CLIENT_SECRET and OIDC_SESSION_SECRET. The operator injects
+                        them into the gateway Deployment via secretKeyRef.
                     oidcIssuer:
                       type: string
                     oidcAudience:

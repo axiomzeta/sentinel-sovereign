@@ -17,6 +17,11 @@ class FakeAdapter:
     def patch_custom_resource(self, *, namespace, name, patch):
         self.patch_calls.append({"namespace": namespace, "name": name, "patch": patch})
 
+    def patch_custom_resource_status(self, *, namespace, name, patch):
+        # Test double records status-subresource writes separately, mirroring
+        # the API server: status must not go through the main resource endpoint.
+        self.patch_calls.append({"namespace": namespace, "name": name, "patch": patch, "status_subresource": True})
+
     def apply_deployment(self, *, namespace, name, body):
         if self.fail_apply:
             raise RuntimeError("boom")
@@ -193,3 +198,32 @@ def test_reconcile_applies_rollback_when_previous_good_state_exists():
     status_patches = [c for c in adapter.patch_calls if "status" in c["patch"]]
     degraded = status_patches[-1]["patch"]["status"]
     assert degraded["conditions"][0]["reason"] == "RollbackApplied"
+
+
+def test_status_writes_use_status_subresource():
+    resource = _base_resource()
+    adapter = FakeAdapter([resource])
+    reconciler = AxiomZetaSentinelGatewayReconciler(adapter)
+    reconciler.reconcile_once()
+    status_patches = [c for c in adapter.patch_calls if c.get("status_subresource")]
+    assert status_patches, "expected status patches via the status subresource"
+    finalizer_patches = [
+        c for c in adapter.patch_calls if "finalizers" in str(c["patch"].get("metadata", {})) and not c.get("status_subresource")
+    ]
+    assert finalizer_patches, "finalizer patch must stay on the main resource endpoint"
+
+
+def test_deployment_wires_secrets_and_security_context():
+    resource = _base_resource()
+    resource["spec"]["auth"] = {"mode": "oidc", "secretName": "gw-secrets"}
+    adapter = FakeAdapter([resource])
+    reconciler = AxiomZetaSentinelGatewayReconciler(adapter)
+    reconciler.reconcile_once()
+    assert adapter.deployment_calls, "expected a deployment apply"
+    body = adapter.deployment_calls[0]["body"]
+    pod_spec = body["spec"]["template"]["spec"]
+    assert pod_spec["securityContext"]["runAsNonRoot"] is True
+    env = pod_spec["containers"][0]["env"]
+    secret_refs = {e["name"]: e["valueFrom"]["secretKeyRef"]["name"] for e in env if "valueFrom" in e}
+    assert secret_refs["GATEWAY_API_KEY"] == "gw-secrets"
+    assert secret_refs["OIDC_SESSION_SECRET"] == "gw-secrets"

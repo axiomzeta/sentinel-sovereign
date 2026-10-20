@@ -356,12 +356,15 @@ def _verify_oidc_token(
 
     try:
         signing_key = _jwk_client_for(jwks_url).get_signing_key_from_jwt(token).key
-        options = {"verify_aud": settings.oidc_audience is not None}
+        # OIDC id_tokens must carry aud == client_id. If OIDC_AUDIENCE is not set explicitly,
+        # fall back to the client_id instead of skipping audience verification entirely.
+        audience = settings.oidc_audience or settings.oidc_client_id
+        options = {"verify_aud": audience is not None}
         claims = jwt.decode(
             token,
             signing_key,
             algorithms=["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
-            audience=settings.oidc_audience,
+            audience=audience,
             issuer=settings.oidc_issuer,
             options=options,
         )

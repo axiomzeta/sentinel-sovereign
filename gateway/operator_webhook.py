@@ -46,6 +46,12 @@ def _validate_axiomzetasentinel_gateway(obj: dict[str, object]) -> tuple[bool, s
         mode = auth.get("mode")
         if mode is not None and mode not in {"api_key", "oidc"}:
             return False, "spec.auth.mode must be one of: api_key, oidc"
+        if mode == "oidc":
+            # The gateway fails closed when OIDC endpoints are missing; reject early.
+            if not isinstance(auth.get("oidcIssuer"), str) or not auth.get("oidcIssuer").strip():
+                return False, "spec.auth.oidcIssuer is required when spec.auth.mode is oidc"
+            if not isinstance(auth.get("oidcJwksUrl"), str) or not auth.get("oidcJwksUrl").strip():
+                return False, "spec.auth.oidcJwksUrl is required when spec.auth.mode is oidc"
 
     policy = spec.get("policy")
     if isinstance(policy, dict):
@@ -103,4 +109,15 @@ def run_webhook() -> None:  # pragma: no cover
 
     host = os.getenv("AXIOM_ZETA_SENTINEL_WEBHOOK_HOST", "0.0.0.0")
     port = int(os.getenv("AXIOM_ZETA_SENTINEL_WEBHOOK_PORT", "9443"))
-    uvicorn.run("gateway.operator_webhook:app", host=host, port=port)
+    # Kubernetes admission webhooks MUST be served over TLS. In-cluster this is
+    # normally a cert-manager-issued cert mounted into the pod; pass the PEM paths
+    # via env. Without them the server runs plain HTTP (local dev/tests only).
+    tls_cert = os.getenv("AXIOM_ZETA_SENTINEL_WEBHOOK_TLS_CERT", "")
+    tls_key = os.getenv("AXIOM_ZETA_SENTINEL_WEBHOOK_TLS_KEY", "")
+    uvicorn.run(
+        "gateway.operator_webhook:app",
+        host=host,
+        port=port,
+        ssl_certfile=tls_cert or None,
+        ssl_keyfile=tls_key or None,
+    )

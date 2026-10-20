@@ -8,6 +8,7 @@ spec:
   tenantRuntimeCacheEnabled: false
   auth:
     mode: oidc
+    # secretName: axiom-zeta-sentinel-gateway-secrets  # Secret with GATEWAY_API_KEY, OIDC_CLIENT_SECRET, OIDC_SESSION_SECRET
     oidcIssuer: https://idp.example.com
     oidcAudience: axiom-zeta-sentinel-sovereign
     oidcJwksUrl: https://idp.example.com/.well-known/jwks.json
