@@ -1,5 +1,7 @@
 # Axiom Zeta Sentinel Sovereign
 
+> **License: None — Proprietary. © 2026 Axiom Zeta Innovations LLC. All rights reserved.** This repository is source-visible only. No license is granted to copy, modify, distribute, or use this software; viewing this code grants no rights. All content is the property of Axiom Zeta Innovations LLC.
+
 > **Sept 2026 revision:** the engine now builds, is deterministic, and compares each window against a learned reference baseline; authentication fails closed. See [CHANGES.md](CHANGES.md) for details and open items.
 
 An API gateway middleware that helps reduce LLM/data drift using a full HRM manifold surgery runtime to stabilize noisy metric streams into a bounded 24-D representation.
