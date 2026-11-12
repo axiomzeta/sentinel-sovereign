@@ -1,6 +1,6 @@
 # Axiom Zeta Sentinel Sovereign
 
-> **License: None — Proprietary. © 2026 Axiom Zeta Innovations LLC. All rights reserved.** This repository is source-visible only. No license is granted to copy, modify, distribute, or use this software; viewing this code grants no rights. All content is the property of Axiom Zeta Innovations LLC.
+> **License: GNU AGPL-3.0.** This project is free software under the GNU Affero General Public License v3.0 — see [LICENSE](LICENSE).
 
 > **Sept 2026 revision:** the engine now builds, is deterministic, and compares each window against a learned reference baseline; authentication fails closed. See [CHANGES.md](CHANGES.md) for details and open items.
 
