@@ -1,6 +1,7 @@
-# Copyright (C) 2026 Axiom Zeta Innovations LLC. All rights reserved.
-# Proprietary — no license is granted to copy, modify, distribute, or use
-# this software. See the repository README for its licensing status.
+# Copyright (C) 2026 Axiom Zeta Innovations LLC.
+# SPDX-License-Identifier: AGPL-3.0-only
+# This program is free software under the terms of the GNU Affero General
+# Public License v3.0. See the LICENSE file in this repository.
 
 from fastapi import FastAPI
 
